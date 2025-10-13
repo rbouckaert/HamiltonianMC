@@ -36,7 +36,6 @@ import org.ejml.data.DenseMatrix64F;
 import beast.base.inference.Distribution;
 import beast.base.math.matrixalgebra.*;
 import beast.base.util.Randomizer;
-import beastclassic.dr.math.distributions.MultivariateDistribution;
 import hmc.datastructures.ReadableMatrix;
 import hmc.datastructures.ReadableVector;
 import hmc.datastructures.WritableVector;

@@ -28,6 +28,7 @@ package hmc.operator;
 
 
 import java.util.ArrayList;
+
 import java.text.DecimalFormat;
 
 import beast.base.core.Description;
@@ -40,6 +41,7 @@ import beast.base.util.Randomizer;
 import hmc.datastructures.MultivariateFunction;
 import hmc.datastructures.ReadableVector;
 import hmc.datastructures.WrappedVector;
+import hmc.distribution.MultivariateNormalDistribution;
 
 /**
  * @author Max Tolkoff
@@ -53,13 +55,52 @@ public class HamiltonianMonteCarloOperator extends Operator {
 	final public Input<Distribution> likelihoodInput = new Input<>("likelihood", "distribution affected by parameter change", Validate.REQUIRED);
 
 	public Input<Boolean> optimiseInput = new Input<>("optimise", "flag to indicate whether to optimise or not", true);
-    public Input<GradientWrtParameterProvider> gradientProviderInput = new Input<>("gradientProvider", "description here");
+//    public Input<GradientWrtParameterProvider> gradientProviderInput = new Input<>("gradientProvider", "description here");
     public Input<Transform> transformInput = new Input<>("transform", "description here");
     public Input<RealParameter> maskParameterInput = new Input<>("maskParameter", "description here");
     public Input<Options> runtimeOptionsInput = new Input<>("runtimeOptions", "description here");
-    public Input<MassPreconditioner> preconditionerInput = new Input<>("preconditioner", "description here");
-    public Input<MassPreconditionScheduler.Type> preconditionerTypeInput = new Input<>("preconditionertype", "description here");
+    public Input<MassPreconditioningOptions> massPreconditioningOptionsInput = new Input<>("massPreconditioningOptions", "description here");
+    public Input<MassPreconditioner.Type> preconditionerInput = new Input<>("preconditioner", "description here", 
+    		MassPreconditioner.Type.FULL, MassPreconditioner.Type.values());
+    public Input<MassPreconditionScheduler.Type> preconditionerTypeInput = new Input<>("preconditionertype", "description here", 
+    		MassPreconditionScheduler.Type.DEFAULT, MassPreconditionScheduler.Type.values());
     
+    private final static String PRECONDITIONING_UPDATE_FREQUENCY = "preconditioningUpdateFrequency";
+    final static String PRECONDITIONING_MAX_UPDATE = "preconditioningMaxUpdate";
+    final static String PRECONDITIONING_DELAY = "preconditioningDelay";
+    private final static String PRECONDITIONING_MEMORY = "preconditioningMemory";
+    private final static String PRECONDITIONING_GUESS_INIT_MASS = "guessInitialMass";
+
+	final public Input<Integer> preconditioningUpdateFrequencyInput = new Input<>(PRECONDITIONING_UPDATE_FREQUENCY,"PRECONDITIONING_UPDATE_FREQUENCY", 0);
+    final public Input<Integer> preconditioningMaxUpdateInput = new Input<>(PRECONDITIONING_MAX_UPDATE,"PRECONDITIONING_MAX_UPDATE", 0);
+    final public Input<Integer> preconditioningDelayInput = new Input<>(PRECONDITIONING_DELAY,"PRECONDITIONING_DELAY", 0);
+    final public Input<Integer> preconditioningMemoryInput = new Input<>(PRECONDITIONING_MEMORY,"PRECONDITIONING_MEMORY", 0);
+    final public Input<Boolean> guessInitialMassInput = new Input<>(PRECONDITIONING_GUESS_INIT_MASS,"PRECONDITIONING_GUESS_INIT_MASS", false);
+
+    public final static String N_STEPS = "nSteps";
+    public final static String STEP_SIZE = "stepSize";
+    public final static String GRADIENT_CHECK_COUNT = "gradientCheckCount";
+    public final static String GRADIENT_CHECK_TOLERANCE = "gradientCheckTolerance";
+    
+    private final static String MAX_ITERATIONS = "checkStepSizeMaxIterations";
+    private final static String REDUCTION_FACTOR = "checkStepSizeReductionFactor";
+    private final static String TARGET_ACCEPTANCE_PROBABILITY = "targetAcceptanceProbability";
+    private final static String INSTABILITY_HANDLER = "instabilityHandler";
+    
+    final public Input<Integer> nStepsInput = new Input<>(N_STEPS,"N_STEPS", 10);
+    final public Input<Double> stepSizeInput = new Input<>(STEP_SIZE, "step size", Validate.REQUIRED);
+    final public Input<Integer> gradientCheckCountInput = new Input<>(GRADIENT_CHECK_COUNT,"GRADIENT_CHECK_COUNT", 0);
+    final public Input<Double> gradientCheckToleranceInput = new Input<>(GRADIENT_CHECK_TOLERANCE,"GRADIENT_CHECK_TOLERANCE", 1E-3);
+    final public Input<Integer> maxIterationsInput = new Input<>(MAX_ITERATIONS,"MAX_ITERATIONS", 10);
+    final public Input<Double> reductionFactorInput = new Input<>(REDUCTION_FACTOR,"REDUCTION_FACTOR", 0.1);
+    final public Input<Double> targetAcceptanceProbabilityInput = new Input<>(TARGET_ACCEPTANCE_PROBABILITY,"TARGET_ACCEPTANCE_PROBABILITY", 0.8); // Stan default
+    final public Input<String> instabilityHandlerCaseInput = new Input<>(INSTABILITY_HANDLER,"INSTABILITY_HANDLER", "reject");
+    final public Input<RealParameter> maskInput = new Input<>("mask", "mask");
+    final public Input<Double> randomStepFractionInput = new Input<>("randomStepFraction", "randomStepFractionInput", 0.0);
+    final public Input<Double> eigenLowerBoundInput = new Input<>("eigenLowerBound","eigenLowerBoundLower",1E-2);
+    final public Input<Double> eigenUpperBoundInput = new Input<>("eigenUpperBound","eigenUpperBoundUpper",1E2);
+    
+    		
     // Type from MassPreconditionScheduler.Type
     public enum Type {none, _default};
     public Input<Type> preconditionSchedulerTypeInput = new Input<>("preconditionSchedulerType", "description here", Type._default, Type.values());
@@ -78,16 +119,107 @@ public class HamiltonianMonteCarloOperator extends Operator {
 	@Override
 	public void initAndValidate() {
 		this.likelihood = likelihoodInput.get();
-		
-        this.gradientProvider = gradientProviderInput.get();
-        this.runtimeOptions = runtimeOptionsInput.get();
-        this.stepSize = runtimeOptions.initialStepSize;
-        this.preconditioning = preconditionerInput.get();
-        MassPreconditionScheduler.Type preconditionSchedulerType = preconditionerTypeInput.get();
-        this.preconditionScheduler = preconditionSchedulerType.factory(runtimeOptions, (Operator) this);
         this.parameter = parameterInput.get();
+
+        
+        this.gradientProvider = new GradientWrtParameterProvider.ParameterWrapper(new MultivariateNormalDistribution(new double[] {0}, 1), parameter, likelihood);
+		
+        this.stepSize = runtimeOptions.initialStepSize;
+
+        MassPreconditioner.Type preconditioningType = preconditionerInput.get(); 
+        MassPreconditioningOptions options = massPreconditioningOptionsInput.get();
+		int preconditioningUpdateFrequency = preconditioningUpdateFrequencyInput.get();
+        int preconditioningMaxUpdate = preconditioningMaxUpdateInput.get();
+        int preconditioningDelay = preconditioningDelayInput.get();
+        int preconditioningMemory = preconditioningMemoryInput.get();
+        boolean guessInitialMass = guessInitialMassInput.get();
+
+        
+        GradientWrtParameterProvider derivative = this.gradientProvider;
+
+        RealParameter eigenLowerBound = new RealParameter(eigenLowerBoundInput.get()+"");  
+        RealParameter eigenUpperBound = new RealParameter(eigenUpperBoundInput.get()+"");
+        
+        options = new MassPreconditioningOptions.Default(
+        			preconditioningUpdateFrequency, 
+        			preconditioningMaxUpdate, 
+        			preconditioningDelay, 
+        			preconditioningMemory, 
+        			guessInitialMass, 
+        			eigenLowerBound, 
+        			eigenUpperBound);
+        this.preconditioning = preconditioningType.factory(gradientProvider, transform, options);
+
+        MassPreconditionScheduler.Type preconditionSchedulerType = preconditionerTypeInput.get();
+
+        int nSteps = nStepsInput.get();
+        double stepSize = stepSizeInput.get();
+
+        PreconditionHandler preconditionHandler = 
+        		new PreconditionHandler(preconditioning,
+        				options,
+        				preconditionSchedulerType);
+
+        double randomStepFraction = randomStepFractionInput.get();
+        if (randomStepFraction > 1) {
+            throw new IllegalArgumentException("Random step count fraction must be < 1.0");
+        }
+
+        if (parameter == null) {
+            parameter = derivative.getParameter();
+        }
+
+
+        boolean dimensionMismatch = derivative.getDimension() != parameter.getDimension();
+        if (transform instanceof Transform.MultivariableTransform) {
+            dimensionMismatch = ((Transform.MultivariableTransform) transform).getDimension() != parameter.getDimension();
+        }
+
+        if (dimensionMismatch) {
+            throw new IllegalArgumentException("Gradient (" + derivative.getDimension() +
+                    ") must be the same dimensions as the parameter (" + parameter.getDimension() + ")");
+        }
+
+        if (preconditionHandler.getMassPreconditioner().getDimension() != parameter.getDimension()) {
+            throw new IllegalArgumentException("preconditioner dimension mismatch." + preconditionHandler.getMassPreconditioner().getDimension() + " != " + derivative.getDimension());
+        }
+
+        RealParameter mask = null;
+        if (maskInput.get() != null) {
+            mask = maskInput.get();
+
+            dimensionMismatch = mask.getDimension() != derivative.getDimension();
+
+            if (transform instanceof Transform.MultivariableTransform) {
+                dimensionMismatch = ((Transform.MultivariableTransform) transform).getDimension() != mask.getDimension();
+            }
+
+            if (dimensionMismatch) {
+                throw new IllegalArgumentException("Mask (" + mask.getDimension()
+                        + ") must be the same dimension as the gradient (" + derivative.getDimension() + ")");
+            }
+        }
+
+        int gradientCheckCount = gradientCheckCountInput.get();
+        double gradientCheckTolerance = gradientCheckToleranceInput.get();
+        int maxIterations = maxIterationsInput.get();
+        double reductionFactor = reductionFactorInput.get();
+        double targetAcceptanceProbability = targetAcceptanceProbabilityInput.get();
+        String instabilityHandlerCase = instabilityHandlerCaseInput.get();
+
+        HamiltonianMonteCarloOperator.InstabilityHandler instabilityHandler = HamiltonianMonteCarloOperator.InstabilityHandler.factory(instabilityHandlerCase);
+
+        this.runtimeOptions = new Options(
+                stepSize, nSteps, randomStepFraction,
+                preconditionHandler.getOptions(),
+                gradientCheckCount, gradientCheckTolerance,
+                maxIterations, reductionFactor,
+                targetAcceptanceProbability,
+                instabilityHandler);
+        
+        this.preconditionScheduler = preconditionSchedulerType.factory(runtimeOptions, (Operator) this);
         this.mask = buildMask(maskParameterInput.get());
-        this.transform = transform;
+        this.transform = transformInput.get();
 
         this.leapFrogEngine = constructLeapFrogEngine(transform);
 	}

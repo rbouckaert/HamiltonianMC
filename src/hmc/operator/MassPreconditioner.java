@@ -44,9 +44,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import beast.base.core.Function;
 import beast.base.inference.CalculationNode;
-import beast.base.inference.operator.kernel.Transform;
 import beast.base.inference.parameter.RealParameter;
 import beast.base.util.MachineAccuracy;
 import beast.base.util.Randomizer;
@@ -89,11 +87,11 @@ public interface MassPreconditioner {
                 final RealParameter parameter = gradient.getParameter();
                 int dim = parameter.getDimension();
                 if (transform != null && transform instanceof Transform.MultivariableTransform) {
-                	dim = 0;
-                	for (Function f : transform.getF()) {
-                		dim += f.getDimension();
-                	}
-                    //dim = ((Transform.MultivariableTransform) transform).getDimension();
+//                	dim = 0;
+//                	for (Function f : transform.getF()) {
+//                		dim += f.getDimension();
+//                	}
+                    dim = ((Transform.MultivariableTransform) transform).getDimension();
                 }
                 return new NoPreconditioning(dim);
             }
@@ -112,10 +110,11 @@ public interface MassPreconditioner {
                 int dimension = 0; 
                 // ((Transform.MultivariableTransform) transform).getDimension() : gradient.getDimension();
                 if (transform instanceof Transform.MultivariableTransform) {
-                	dimension = 0;
-                    for (Function f : transform.getF()) {
-                    	dimension += f.getDimension();
-                    }
+//                	dimension = 0;
+//                    for (Function f : transform.getF()) {
+//                    	dimension += f.getDimension();
+//                    }
+                	dimension = ((Transform.MultivariableTransform) transform).getDimension();
                 } else {
                 	dimension = gradient.getDimension();
                 }
