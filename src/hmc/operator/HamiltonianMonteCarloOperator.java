@@ -58,7 +58,7 @@ public class HamiltonianMonteCarloOperator extends Operator {
 //    public Input<GradientWrtParameterProvider> gradientProviderInput = new Input<>("gradientProvider", "description here");
     public Input<Transform> transformInput = new Input<>("transform", "description here");
     public Input<RealParameter> maskParameterInput = new Input<>("maskParameter", "description here");
-    public Input<Options> runtimeOptionsInput = new Input<>("runtimeOptions", "description here");
+//    public Input<Options> runtimeOptionsInput = new Input<>("runtimeOptions", "description here");
     public Input<MassPreconditioningOptions> massPreconditioningOptionsInput = new Input<>("massPreconditioningOptions", "description here");
     public Input<MassPreconditioner.Type> preconditionerInput = new Input<>("preconditioner", "description here", 
     		MassPreconditioner.Type.FULL, MassPreconditioner.Type.values());
@@ -124,7 +124,7 @@ public class HamiltonianMonteCarloOperator extends Operator {
         
         this.gradientProvider = new GradientWrtParameterProvider.ParameterWrapper(new MultivariateNormalDistribution(new double[] {0}, 1), parameter, likelihood);
 		
-        this.stepSize = runtimeOptions.initialStepSize;
+        this.stepSize = stepSizeInput.get(); // runtimeOptions.initialStepSize;
 
         MassPreconditioner.Type preconditioningType = preconditionerInput.get(); 
         MassPreconditioningOptions options = massPreconditioningOptionsInput.get();
@@ -549,7 +549,7 @@ public class HamiltonianMonteCarloOperator extends Operator {
         return vector;
     }
 
-    private static final boolean DEBUG = false;
+    private static final boolean DEBUG = true;
 
     public static class Options implements MassPreconditioningOptions {
 
