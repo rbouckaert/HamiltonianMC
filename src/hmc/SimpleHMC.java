@@ -1,15 +1,22 @@
 package hmc;
 
 
+import beast.base.core.BEASTInterface;
 import beast.base.core.Input;
 import beast.base.core.Input.Validate;
+import beast.base.evolution.tree.Node;
+import beast.base.evolution.tree.TreeInterface;
 import beast.base.inference.Distribution;
+import beast.base.inference.MCMC;
 import beast.base.inference.Operator;
 import beast.base.inference.State;
 import beast.base.inference.parameter.RealParameter;
 import beast.base.util.Randomizer;
+import beastbooster.likelihood.Targetable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 public class SimpleHMC extends Operator {
 	final public Input<RealParameter> parameterInput = new Input<>("parameter", "parameter on which to operate", Validate.REQUIRED);
@@ -31,6 +38,8 @@ public class SimpleHMC extends Operator {
     
     private double lower;
     
+	private List<Targetable> targets;
+
 	@Override
 	public void initAndValidate() {
 		parameter = parameterInput.get();
@@ -43,6 +52,32 @@ public class SimpleHMC extends Operator {
 		gradient = new double[dimension];
 		
 		lower = 0.1;
+		
+		targets = new ArrayList<>();
+		discoverTargets(this);
+		
+	}
+
+	private void discoverTargets(BEASTInterface o2) {
+		for (BEASTInterface o : o2.getOutputs()) {
+			if (o instanceof MCMC) {
+				discoverTargetsDown(o);
+			} else {
+				discoverTargets(o);
+			}
+		}
+	}
+
+	private void discoverTargetsDown(BEASTInterface o) {
+		for (BEASTInterface o2 : o.listActiveBEASTObjects()) {
+			if (o2 instanceof Targetable) {
+				if (!targets.contains((Targetable) o2)) {
+					targets.add((Targetable) o2);
+				}
+			} else {
+				discoverTargetsDown(o2);
+			}
+		}
 	}
 
 	@Override
@@ -128,6 +163,35 @@ public class SimpleHMC extends Operator {
         state.checkCalculationNodesDirtiness();
         double logP0 = likelihood.calculateLogP();
         state.acceptCalculationNodes();
+        
+        
+        if (targets.size() > 0) {
+        	BEASTInterface o = (BEASTInterface) targets.get(0);
+        	Input<?> treeInput = o.getInput("tree");
+        	TreeInterface tree = (TreeInterface) treeInput.get();
+        	Node [] nodes = new Node[tree.getNodeCount()];
+        	tree.listNodesPostOrder(tree.getRoot(), nodes);
+        	for (int j = 0; j < dimension; j++) {
+        		Node current = nodes[j];
+        		int i = current.getNr();
+        		for (Targetable t : targets) {
+        			t.setTarget(current.getParent().getNr());
+        		}
+
+        		parameter.setValue(i, proposedPosition[i] + DELTA);
+                state.storeCalculationNodes();
+                state.checkCalculationNodesDirtiness();
+                double logP1 = likelihood.calculateLogP();
+                state.restore();
+                state.restoreCalculationNodes();
+            	
+                gradient[i] = (logP0 - logP1) / DELTA;
+        		
+        	}
+        	return gradient;
+        }
+        
+        
         
         for (int i = 0; i < dimension; i++) {
 //        	state.store(-1);
